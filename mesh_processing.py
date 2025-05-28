@@ -2,6 +2,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+
 # read obj file
 def readObjFile(file_path):
     vertices = []
@@ -159,6 +160,52 @@ def detect_holes(halfEdgesArray, ignore_largest=False):
         return all_loops[1:]
     return all_loops
 
+def draw_pca_plane(hole):
+    """
+    Given a list of Vertex objects forming a hole boundary,
+    draw the best-fit PCA plane and the projected points.
+    """
+    # Convert to numpy array
+    hole_points = np.array([[v.x, v.y, v.z] for v in hole])
+
+    # PCA
+    centroid = np.mean(hole_points, axis=0)
+    centered = hole_points - centroid
+    cov = np.cov(centered.T)
+    eigvals, eigvecs = np.linalg.eigh(cov)
+
+    normal = eigvecs[:, 0]
+    u = eigvecs[:, 1]
+    v = eigvecs[:, 2]
+
+    # Project to 2D and back to 3D
+    proj_2d = np.array([[np.dot(p, u), np.dot(p, v)] for p in centered])
+    projected_back = np.array([centroid + x*u + y*v for x, y in proj_2d])
+
+    # Plot
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+
+    # Original points
+    ax.scatter(hole_points[:,0], hole_points[:,1], hole_points[:,2], color='blue', label='Original 3D points')
+
+    # Projected points on plane
+    ax.scatter(projected_back[:,0], projected_back[:,1], projected_back[:,2], color='green', label='Projected points (on plane)')
+
+    # Plane mesh
+    plane_size = 2
+    plane_grid_u, plane_grid_v = np.meshgrid(np.linspace(-plane_size, plane_size, 10), np.linspace(-plane_size, plane_size, 10))
+    plane_points = centroid[:, np.newaxis, np.newaxis] + u[:, np.newaxis, np.newaxis]*plane_grid_u + v[:, np.newaxis, np.newaxis]*plane_grid_v
+    ax.plot_surface(plane_points[0], plane_points[1], plane_points[2], alpha=0.3, color='gray')
+
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    ax.legend()
+    ax.set_title('PCA Plane and Projected Points')
+    plt.tight_layout()
+    plt.show()
+    return True
 
 
 def process_mesh(input_name: str, output_name: str, ignore_outer_boundary=True):
@@ -203,7 +250,24 @@ def process_mesh(input_name: str, output_name: str, ignore_outer_boundary=True):
                         break
         else:
             #Fill non-triangular meshes
-            pass
+            hole_points = np.array([(v.x, v.y, v.z) for v in hole])
+            
+            centroid = np.mean(hole_points, axis=0)
+            centered = hole_points - centroid
+            
+            cov = np.cov(centered.T)
+
+            eigvals, eigvecs = np.linalg.eigh(cov)
+            
+            u = eigvecs[:, 1]
+            v = eigvecs[:, 2]
+            
+            # Project centered points to the plane
+            proj_2d = np.array([
+                [np.dot(p, u), np.dot(p, v)]
+                for p in centered
+            ])
+                        
         
     newVertices, newFaces = HEDStoVF(verticesArray, halfEdgesArray, facesArray)
     writeObjFile(newVertices, newFaces, output_name)
