@@ -1,15 +1,11 @@
-
 # Computational Geometry final project 2025
 import numpy as np
 import matplotlib.pyplot as plt
-
-
 
 # read obj file
 def readObjFile(file_path):
     vertices = []
     faces = []
-    
     with open(file_path, 'r') as obj_file:
         for line in obj_file:
             if line.startswith('v '):
@@ -21,9 +17,7 @@ def readObjFile(file_path):
                 faces.append(face)
     return vertices, faces
 
-# plot the mesh (optional, we will use meshlab) 
-
-# convert to HEDS (half-edges data structure)
+# Half-edge data structure
 class Vertex:
     def __init__(self, x, y, z):
         self.x = x
@@ -43,71 +37,62 @@ class HalfEdge:
         self.next = None
         self.prev = None
 
-
 def VFtoHEDS(vertices, faces):
-    # create vertices
-    verticesArray = {}
-    for i, (x, y, z) in enumerate(vertices):
-        vertex = Vertex(x, y, z)
-        verticesArray[i] = vertex
-
-    # Create half edges
-    halfEdgesArray = [HalfEdge() for _ in range(len(faces)*3)]
-
-    # Create faces
+    verticesArray = {i: Vertex(*v) for i, v in enumerate(vertices)}
+    halfEdgesArray = []
     facesArray = {}
-    for i, _ in enumerate(faces):
-        face = Face()
-        facesArray[i] = face
+    edge_dict = {}
 
-    # Connect halfEdges to vertices
-    for face_index, face_vertices in enumerate(faces): 
-        for i, vertex_index in enumerate(face_vertices):
-            halfEdge = halfEdgesArray[face_index *3 +i]
-            halfEdge.vertex = verticesArray[vertex_index]
-            verticesArray[vertex_index].halfEdge = halfEdge
-    
-    # Connect half edges to faces
-    for face_index, face_vertices in enumerate(faces):
-        face = facesArray[face_index]
-        face_halfEdgesArray = [halfEdgesArray[face_index * 3 + i] for i in range(3)]
-        face.halfEdge = face_halfEdgesArray[0]
+    for face_index, face in enumerate(faces):
+        f = Face()
+        facesArray[face_index] = f
+
+        face_halfedges = []
         for i in range(3):
-            face_halfEdgesArray[i].face = face
-            face_halfEdgesArray[i].next = face_halfEdgesArray[(i + 1) % 3]
-            face_halfEdgesArray[i].prev = face_halfEdgesArray[(i + 2) % 3]
+            he = HalfEdge()
+            he.origin = verticesArray[face[i]]
+            verticesArray[face[i]].halfEdge = he
+            he.face = f
+            face_halfedges.append(he)
+            halfEdgesArray.append(he)
 
-    # Connect twins
+        for i in range(3):
+            face_halfedges[i].next = face_halfedges[(i + 1) % 3]
+            face_halfedges[i].prev = face_halfedges[(i + 2) % 3]
+
+            origin = face[i]
+            dest = face[(i + 1) % 3]
+            edge_dict[(origin, dest)] = face_halfedges[i]
+
+        f.halfEdge = face_halfedges[0]
+
+    for (origin, dest), he in edge_dict.items():
+        twin = edge_dict.get((dest, origin))
+        if twin:
+            he.twin = twin
 
     return verticesArray, halfEdgesArray, facesArray
 
-
-
-
-
-
-# convert back to VF (Vertices Faces data structure)
 def getFaceVertices(face):
     vertices = []
     start_halfEdge = face.halfEdge
     current_halfEdge = start_halfEdge
     while True:
-        vertices.append(current_halfEdge.vertex)
+        vertices.append(current_halfEdge.origin)
         current_halfEdge = current_halfEdge.next
         if current_halfEdge == start_halfEdge:
             break
     return vertices
 
 def HEDStoVF(verticesArray, halfEdgesArray, facesArray):
-    vertices = [(vertex.x, vertex.y, vertex.z) for vertex in verticesArray.values()]
+    vertices = [(v.x, v.y, v.z) for v in verticesArray.values()]
     faces = []
     for face in facesArray.values():
         face_vertices = getFaceVertices(face)
-        face_indices = [list(verticesArray.keys())[list(verticesArray.values()).index(vertex)] for vertex in face_vertices]
+        face_indices = [list(verticesArray.keys())[list(verticesArray.values()).index(v)] for v in face_vertices]
         faces.append(face_indices)
     return vertices, faces
 
-# write the final .obj or .ply file (with color coding)
 def writeObjFile(vertices, faces, output_file):
     with open(output_file, 'w') as obj_file:
         for vertex in vertices:
@@ -115,45 +100,112 @@ def writeObjFile(vertices, faces, output_file):
         for face in faces:
             obj_file.write('f ' + ' '.join(map(lambda x: str(x + 1), face)) + '\n')
 
-def visualizeMesh(vertices, faces, vertex_color='k', edge_color='b'):
+def visualizeMesh(vertices, faces, holes=None, filled_faces=None):
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
     
-    # Plot vertices
     vertices_array = np.array(vertices)
-    ax.scatter(vertices_array[:,0], vertices_array[:,2], vertices_array[:,1], c=vertex_color, depthshade=False)
+    ax.scatter(vertices_array[:, 0], vertices_array[:, 2], vertices_array[:, 1], c='k', depthshade=False)
     
-    # Plot edges
     for face in faces:
         face_vertices = [vertices[i] for i in face]
-        face_vertices.append(vertices[face[0]])  # Close the loop
+        face_vertices.append(vertices[face[0]])
         face_vertices = np.array(face_vertices)
-        ax.plot(face_vertices[:,0], face_vertices[:,2], face_vertices[:,1], c=edge_color)  
-        
-    # Set equal aspect ratio
-    ax.set_box_aspect([np.ptp(vertices_array[:,0]), np.ptp(vertices_array[:,0]), np.ptp(vertices_array[:,1])])
+        ax.plot(face_vertices[:, 0], face_vertices[:, 2], face_vertices[:, 1], c='b')
 
+    if holes:
+        for hole in holes:
+            x = [v.x for v in hole] + [hole[0].x]
+            y = [v.y for v in hole] + [hole[0].y]
+            z = [v.z for v in hole] + [hole[0].z]
+            ax.plot(x, z, y, color='r', linewidth=2)
+
+    if filled_faces:
+        for face in filled_faces:
+            verts = getFaceVertices(face)
+            x = [v.x for v in verts] + [verts[0].x]
+            y = [v.y for v in verts] + [verts[0].y]
+            z = [v.z for v in verts] + [verts[0].z]
+            ax.plot(x, z, y, color='g', linewidth=2)
+
+    ax.set_box_aspect([np.ptp(vertices_array[:, 0]), np.ptp(vertices_array[:, 0]), np.ptp(vertices_array[:, 1])])
     ax.set_xlabel('X')
     ax.set_ylabel('Y')
     ax.set_zlabel('Z')
-    
+    plt.title("Mesh with Triangular Holes Filled (Green)")
     plt.show()
-    
-def process_mesh(input_name: str, output_name: str):
-    # read obj
+
+
+def detect_holes(halfEdgesArray, ignore_largest=False):
+    visited = set()
+    all_loops = []
+
+    for he in halfEdgesArray:
+        if he.twin is None and he not in visited:
+            loop = []
+            current = he
+            while current not in visited:
+                visited.add(current)
+                loop.append(current.origin)
+                current = current.next
+                while current.twin:
+                    current = current.twin.next
+            all_loops.append(loop)
+            
+    print(len(all_loops), "holes detected")
+
+    if ignore_largest and len(all_loops) > 1:
+        all_loops.sort(key=lambda loop: -len(loop))
+        return all_loops[1:]
+    return all_loops
+
+
+
+def process_mesh(input_name: str, output_name: str, ignore_outer_boundary=True):
     vertices, faces = readObjFile(input_name)
-
-    # visualize the mesh
-    visualizeMesh(vertices, faces)   
-
-    # convert to HEDS
     verticesArray, halfEdgesArray, facesArray = VFtoHEDS(vertices, faces)
-
-    # Any mesh processing operation (your final project) using HEDS structure
-
-    # convert back to VF
-    newVertices, newFaces = HEDStoVF(verticesArray, halfEdgesArray, facesArray)
-
-    # write the final result
-    writeObjFile(newVertices, newFaces, output_name)
     
+    holes = detect_holes(halfEdgesArray, ignore_largest= not ignore_outer_boundary)
+
+    filled_faces = []
+
+    #Fill triangular holes
+    for hole in holes:
+        if len(hole) == 3:
+            # Create new face
+            f = Face()
+            facesArray[len(facesArray)] = f
+            filled_faces.append(f)
+
+            new_halfedges = []
+            for i in range(3):
+                he = HalfEdge()
+                he.origin = hole[i]
+                he.face = f
+                new_halfedges.append(he)
+                halfEdgesArray.append(he)
+
+            # Link next/prev
+            for i in range(3):
+                new_halfedges[i].next = new_halfedges[(i + 1) % 3]
+                new_halfedges[i].prev = new_halfedges[(i - 1) % 3]
+
+            f.halfEdge = new_halfedges[0]
+
+            # Assign twins
+            for i in range(3):
+                origin = hole[i]
+                dest = hole[(i + 1) % 3]
+                for he in halfEdgesArray:
+                    if he.origin == dest and he.next.origin == origin:
+                        he.twin = new_halfedges[i]
+                        new_halfedges[i].twin = he
+                        break
+        else:
+            #Fill non-triangular meshes
+            pass
+        
+    newVertices, newFaces = HEDStoVF(verticesArray, halfEdgesArray, facesArray)
+    writeObjFile(newVertices, newFaces, output_name)
+    visualizeMesh(newVertices, newFaces, holes, filled_faces)
+
