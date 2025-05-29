@@ -1,7 +1,8 @@
 # Computational Geometry final project 2025
 import numpy as np
 import matplotlib.pyplot as plt
-
+from matplotlib.path import Path
+from scipy.spatial import Delaunay
 
 # read obj file
 def readObjFile(file_path):
@@ -207,6 +208,51 @@ def draw_pca_plane(hole):
     plt.show()
     return True
 
+def plot_delaunay_2d(points, delaunay):
+    plt.figure(figsize=(8, 6))
+    plt.triplot(points[:, 0], points[:, 1], delaunay.simplices, color='gray')
+    plt.plot(points[:, 0], points[:, 1], 'o', color='blue', markersize=2)
+    plt.gca().set_aspect('equal')
+    plt.title('2D Delaunay Triangulation (Projected Plane)')
+    plt.xlabel('u')
+    plt.ylabel('v')
+    plt.tight_layout()
+    plt.show()
+
+def compute_vertex_normals(verticesArray, facesArray):
+    """Compute average normal for each vertex in the mesh."""
+    vertex_normals = {v_id: np.zeros(3) for v_id in verticesArray}
+
+    for face in facesArray.values():
+        verts = getFaceVertices(face)
+        if len(verts) < 3:
+            continue
+
+        # Get position vectors
+        p0 = np.array([verts[0].x, verts[0].y, verts[0].z])
+        p1 = np.array([verts[1].x, verts[1].y, verts[1].z])
+        p2 = np.array([verts[2].x, verts[2].y, verts[2].z])
+
+        # Face normal (not normalized yet)
+        normal = np.cross(p1 - p0, p2 - p0)
+        normal /= np.linalg.norm(normal) + 1e-8
+
+        # Assign normal to each vertex
+        for v in verts:
+            for idx, vertex in verticesArray.items():
+                if vertex == v:
+                    vertex_normals[idx] += normal
+                    break
+
+    # Normalize all vertex normals
+    for idx in vertex_normals:
+        norm = np.linalg.norm(vertex_normals[idx])
+        if norm > 0:
+            vertex_normals[idx] /= norm
+
+    return vertex_normals
+
+
 
 def process_mesh(input_name: str, output_name: str, ignore_outer_boundary=True):
     vertices, faces = readObjFile(input_name)
@@ -267,7 +313,35 @@ def process_mesh(input_name: str, output_name: str, ignore_outer_boundary=True):
                 [np.dot(p, u), np.dot(p, v)]
                 for p in centered
             ])
-                        
+            
+            #Form a polygon with the projected points
+            polygon = Path(proj_2d)
+            
+            min_x, min_y = np.min(proj_2d, axis=0)
+            max_x, max_y = np.max(proj_2d, axis=0)
+            
+            # Calculate spacing between points
+            distances = [
+                np.linalg.norm(hole_points[i] - hole_points[(i + 1) % len(hole_points)])
+                for i in range(len(hole_points))
+            ]
+            spacing = np.mean(distances) * 0.75
+
+            x_vals = np.arange(min_x, max_x, spacing)
+            y_vals = np.arange(min_y, max_y, spacing)
+            xx, yy = np.meshgrid(x_vals, y_vals)
+            grid_points = np.vstack([xx.ravel(), yy.ravel()]).T
+            
+            # Filter points outside the hole
+            inside_points = grid_points[polygon.contains_points(grid_points)]
+            
+            points_for_delaunay = np.vstack([proj_2d, inside_points])
+            
+            triangulation = Delaunay(points_for_delaunay)
+            
+            plot_delaunay_2d(points_for_delaunay, triangulation)
+            
+
         
     newVertices, newFaces = HEDStoVF(verticesArray, halfEdgesArray, facesArray)
     writeObjFile(newVertices, newFaces, output_name)
